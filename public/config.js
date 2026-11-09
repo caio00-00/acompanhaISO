@@ -7,4 +7,4 @@
 // NUNCA coloque aqui a secret key (sb_secret_...) nem a senha do banco.
 // =====================================================================
 export const SUPABASE_URL = 'https://esibzbpkcjjglewplnwn.supabase.co';
-export const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_COLE_AQUI';
+export const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_TiuSOEuDVeyPfpsgFeKqMg_FkQ1bozL';

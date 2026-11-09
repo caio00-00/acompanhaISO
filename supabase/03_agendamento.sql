@@ -1,1 +1,0 @@
--- Arquivo antigo: o agendamento agora está em 04_agendamento.sql. Pode apagar (git rm).
