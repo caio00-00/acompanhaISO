@@ -1,0 +1,17 @@
+{
+  "name": "plano-acao-auditoria",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Acompanhamento do Plano de Ação da Auditoria Interna (OROS · BU Educação) — Vercel + Supabase",
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "node dev.js"
+  },
+  "dependencies": {
+    "nodemailer": "10.2.1",
+    "pg": "8.23.1"
+  }
+}
