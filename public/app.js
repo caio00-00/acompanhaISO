@@ -187,9 +187,9 @@ function pedirIdentidade(depois, podeFechar = true) {
       <p class="sub" style="margin:0 0 14px">Seu nome fica registrado no histórico quando você altera uma atividade.</p>
       <div class="campo"><label for="qs-pessoa">Pessoa</label>
         <select id="qs-pessoa"><option value="">Selecione…</option>${opcoes}</select></div>
-      <p class="nota">Seu nome não está na lista? Peça para incluírem na aba E-mails → Adicionar pessoa.</p>
+      <p class="nota">Seu nome não está na lista? Escolha qualquer um por enquanto e inclua o seu na aba E-mails → Adicionar pessoa.</p>
     </div>
-    <div class="modal-rod">${podeFechar ? '<button class="link" id="qs-sair" type="button" style="margin-right:auto">Sair deste aparelho</button>' : ''}
+    <div class="modal-rod">${podeFechar ? '<button class="link" id="qs-sair" type="button" style="margin-right:auto">Esquecer neste aparelho</button>' : ''}
       <button class="btn btn-azul" id="qs-ok" type="button">Continuar</button></div>`, { fixo: !podeFechar });
   if (!podeFechar) $('.fechar', m).remove();
   $('#qs-ok', m).addEventListener('click', () => {
@@ -753,11 +753,12 @@ function abrirComoConectar() {
 // início
 // ============================================================================
 async function iniciar() {
-  if (!estado.senha) { $('#app').innerHTML = ''; mostrarEntrada(); return; }
+  // Tenta carregar direto; se o servidor exigir senha (401), a tela de senha aparece sozinha
   try {
     await carregar();
   } catch (e) {
-    if (e.status !== 401) $('#app').innerHTML = `<div class="card vazio">Não foi possível carregar os dados.<br><small>${esc(e.message)}</small><br><br><button class="btn" onclick="location.reload()">Tentar de novo</button></div>`;
+    if (e.status === 401) { $('#app').innerHTML = ''; return; }
+    $('#app').innerHTML = `<div class="card vazio">Não foi possível carregar os dados.<br><small>${esc(e.message)}</small><br><br><button class="btn" onclick="location.reload()">Tentar de novo</button></div>`;
     return;
   }
   if (!eu()) pedirIdentidade(() => render(), false);

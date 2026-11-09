@@ -49,7 +49,7 @@ dev.js             servidor local para testar (npm run dev)
 | Variável | O que é |
 |---|---|
 | `DATABASE_URL` | string do passo 1.3 |
-| `ACESSO_SENHA` | senha que a equipe vai digitar para entrar |
+| `ACESSO_SENHA` | **opcional** — só cadastre se quiser pedir senha para entrar. Sem ela, o site abre direto |
 | `CRON_SECRET` | texto longo aleatório (use o mesmo no 03_agendamento.sql) |
 | `SMTP_HOST` | `smtp.gmail.com` (Google) ou `smtp.office365.com` (Microsoft) |
 | `SMTP_PORT` | `465` (Google) ou `587` (Microsoft) |
@@ -57,7 +57,7 @@ dev.js             servidor local para testar (npm run dev)
 | `SMTP_PASS` | senha de app dessa conta |
 | `SITE_URL` | opcional — endereço do site, se usar domínio próprio |
 
-3. **Deploy**. Abra o site, entre com a `ACESSO_SENHA` e escolha seu nome.
+3. **Deploy**. Abra o site e escolha seu nome (se cadastrou `ACESSO_SENHA`, ele pede a senha antes).
 
 **Conta de e-mail**
 - Google Workspace / Gmail: ative a verificação em duas etapas na conta e crie uma *senha de app* (Conta Google → Segurança → Senhas de app). Use essa senha em `SMTP_PASS`.
@@ -79,7 +79,8 @@ Para testar sem esperar: na aba E-mails, use **Ver prévia** e **Enviar teste pa
 
 ## Como funciona o uso
 
-- **Quem é você?** — no primeiro acesso cada pessoa escolhe o próprio nome; ele vai para o histórico das alterações. Dá para trocar no botão com o nome, no topo. (É identificação, não login: quem tem a senha da equipe pode alterar qualquer atividade.)
+- **Quem é você?** — no primeiro acesso cada pessoa escolhe o próprio nome; ele vai para o histórico das alterações. Dá para trocar no botão com o nome, no topo. (É identificação, não login.)
+- **Sem senha** (padrão) — quem tiver o link consegue ver e alterar as atividades. O site não aparece no Google, mas evite divulgar o link fora da equipe. Para fechar, basta cadastrar `ACESSO_SENHA` na Vercel e fazer redeploy. Sem senha, o "Enviar teste" só envia para e-mails já cadastrados na lista.
 - **Prazo** — a primeira definição de prazo não pede motivo. Mudar um prazo já definido exige motivo e marca a atividade como **Data alterada** (com "Antes: …").
 - **Atrasada** — prazo anterior a hoje e status diferente de Concluído.
 - **"15 de cada mês"** — as duas ações recorrentes de RH mostram "Todo dia 15" e o próximo dia 15; o prazo delas não é editável.

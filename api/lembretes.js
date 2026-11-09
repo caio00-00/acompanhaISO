@@ -5,7 +5,7 @@
 //     "previa"    { pessoa_id }          → HTML do e-mail daquela pessoa (ou do resumo, pessoa_id = "resumo")
 //     "teste"     { pessoa_id, email }   → envia a prévia para o e-mail informado
 //     "verificar"                        → testa a conexão SMTP
-import { rota, exigirSenha, ehAgendamento, corpo, urlDoSite, HttpError } from '../lib/http.js';
+import { rota, exigirSenha, senhaAtiva, ehAgendamento, corpo, urlDoSite, HttpError } from '../lib/http.js';
 import { db } from '../lib/db.js';
 import { carregarDados } from '../lib/dados.js';
 import { agoraSP } from '../lib/regras.js';
@@ -83,6 +83,18 @@ async function pelaTela(req) {
 
     const email = String(b.email || '').trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Informe um e-mail válido para o teste');
+    if (!senhaAtiva()) {
+      // Sem senha, o site é aberto: o teste só vai para e-mails já cadastrados (evita uso para spam)
+      const cfg = dados.config;
+      const conhecidos = new Set([
+        ...dados.pessoas.map((p) => p.email),
+        cfg.remetente_email,
+        ...String(cfg.resumo_email || '').split(/[;,]/),
+      ].filter(Boolean).map((e) => e.trim().toLowerCase()));
+      if (!conhecidos.has(email.toLowerCase())) {
+        throw new HttpError(400, 'O teste só pode ir para um e-mail cadastrado na lista de destinatários (salve o seu primeiro).');
+      }
+    }
     const t = criarTransporte();
     try {
       const r = await enviar(t, dados.config, { ...msg, para: email, assunto: `[Teste] ${msg.assunto}` }, { tipo: 'teste', pessoaId });
