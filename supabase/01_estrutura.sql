@@ -1,6 +1,6 @@
 -- =====================================================================
 -- Plano de Ação · Auditoria Interna (OROS · BU Educação)
--- 1/3 — Estrutura do banco
+-- 1/4 — Estrutura do banco
 --
 -- Cole no Supabase: SQL Editor → New query → Run.
 -- Pode rodar de novo sem perder dados (só cria o que ainda não existe).
@@ -98,8 +98,8 @@ create table if not exists envios (
 
 -- ---------------------------------------------------------------------
 -- Segurança: RLS ligado e nenhuma política.
--- Ninguém lê ou grava pela chave pública (anon) do Supabase; só a API
--- da Vercel, que conecta direto no Postgres com a senha do banco.
+-- A chave pública (publishable) não lê nem grava direto nas tabelas:
+-- a página só usa as funções do 03_funcoes.sql, que validam tudo.
 -- ---------------------------------------------------------------------
 alter table areas                  enable row level security;
 alter table pessoas                enable row level security;

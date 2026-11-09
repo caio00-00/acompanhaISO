@@ -1,101 +1,89 @@
 # Plano de Ação · Auditoria Interna (OROS · BU Educação)
 
-Página de acompanhamento das 39 ações levantadas na auditoria interna. Cada responsável entra, marca o andamento (A fazer → Fazendo → Concluído), ajusta o prazo com motivo e tudo fica salvo no Supabase com histórico. Toda semana sai um e-mail para cada pessoa com o que ainda está pendente.
+Página de acompanhamento das 39 ações levantadas na auditoria interna. Cada responsável entra, marca o andamento (A fazer → Fazendo → Concluído), ajusta o prazo com motivo e tudo fica salvo no Supabase com histórico. Opcionalmente, toda semana sai um e-mail para cada pessoa com o que está pendente.
 
-- **Painel** — números gerais e um cartão por área (filtra por pessoa).
-- **Atividades** — lista por área, filtros por pessoa, área, status, "data alterada" e "atrasadas"; botão **Editar** em cada uma.
-- **E-mails** — remetente, dia/horário do envio automático, destinatários, prévia e teste.
+- **Painel**: números gerais e um cartão por área (filtra por pessoa).
+- **Atividades**: lista por área, filtros por pessoa, área, status, "data alterada" e "atrasadas"; botão **Editar** em cada uma.
+- **E-mails**: remetente, dia/horário do envio automático, destinatários, prévia e teste.
 
-As atividades são fixas (vêm do documento). Pela página só se altera status, prazo, responsáveis e observação.
+A página fala direto com o Supabase usando a **publishable key**. Não precisa de senha do banco nem de variáveis na Vercel.
 
 ---
 
 ## Estrutura
 
 ```
-public/            página (HTML, CSS e JS puros — sem build)
-api/               funções da Vercel
-  dados.js           GET  tudo o que as telas usam
-  atividade.js       PATCH status / prazo / responsáveis / observação (grava histórico)
-  pessoas.js         POST adicionar pessoa · PUT salvar e-mails
-  config.js          PUT  configurações da aba E-mails
-  lembretes.js       envio semanal (agendamento), prévia, teste e teste de conexão
-lib/               código compartilhado (banco, regras de prazo, montagem dos e-mails)
+public/
+  config.js          URL do Supabase + publishable key  ← preencher
+  supabase.js        chamada às funções do banco
+  index.html, app.js, style.css
+api/lembretes.js     única função da Vercel: envio dos e-mails (opcional)
+lib/                 montagem dos e-mails e regras de prazo
 supabase/
   01_estrutura.sql   tabelas
   02_atividades.sql  as 39 atividades, responsáveis e observações do documento
-  03_agendamento.sql agendamento semanal (pg_cron)
-dev.js             servidor local para testar (npm run dev)
+  03_funcoes.sql     funções que a página usa (obrigatório)
+  04_agendamento.sql agendamento semanal dos e-mails (opcional)
 ```
 
 ---
 
 ## 1. Supabase
 
-1. Crie o projeto (região São Paulo, se possível) e guarde a **senha do banco**.
-2. **SQL Editor → New query**: cole e rode `supabase/01_estrutura.sql`; depois, numa nova query, `supabase/02_atividades.sql`.
-   - Os dois podem ser rodados de novo sem apagar o andamento.
-3. Pegue a string de conexão: botão **Connect** (topo) → **Transaction pooler** (porta **6543**). Fica assim:
-   `postgresql://postgres.abcdefgh:SUA_SENHA@aws-0-sa-east-1.pooler.supabase.com:6543/postgres`
-   - Se a senha tiver `@`, `#`, `/` ou `%`, troque por `%40`, `%23`, `%2F`, `%25`.
+No **SQL Editor**, rode, nesta ordem e cada um numa query:
 
-> Segurança: as tabelas ficam com RLS ligado e sem políticas, então a chave pública (anon) do Supabase não lê nada. Só a API da Vercel acessa, pela string de conexão.
+1. `supabase/01_estrutura.sql`
+2. `supabase/02_atividades.sql`
+3. `supabase/03_funcoes.sql`
 
-## 2. Vercel
+Todos podem ser rodados de novo sem apagar o andamento.
 
-1. Suba esta pasta para um repositório no GitHub e importe na Vercel (**Add New → Project**). Framework Preset: **Other**. Não precisa de Build Command.
-2. Em **Settings → Environment Variables**, cadastre:
+**Segurança:** as tabelas ficam fechadas para a chave pública. A página só consegue chamar as funções do `03_funcoes.sql`, e elas validam tudo: por exemplo, mudar prazo sem motivo é recusado pelo próprio banco, e tudo vai para o histórico.
+
+## 2. Ligar a página ao Supabase
+
+Edite `public/config.js`:
+
+- `SUPABASE_URL`: Project Settings → Data API → Project URL
+- `SUPABASE_PUBLISHABLE_KEY`: Project Settings → API Keys → Publishable key (`sb_publishable_...`)
+
+A publishable key pode ir para o GitHub. **Nunca** coloque ali a secret key (`sb_secret_...`) nem a senha do banco.
+
+## 3. Vercel
+
+Importe o repositório (**Add New → Project**). Framework Preset: **Other**, sem Build Command. Não precisa cadastrar variável nenhuma: depois do deploy, a página já funciona.
+
+## 4. E-mails automáticos (opcional)
+
+Os e-mails precisam da senha da conta de e-mail. Essa senha não pode ir para o GitHub, então estas variáveis ficam na Vercel (**Settings → Environment Variables**, depois **Redeploy**):
 
 | Variável | O que é |
 |---|---|
-| `DATABASE_URL` | string do passo 1.3 |
-| `ACESSO_SENHA` | **opcional** — só cadastre se quiser pedir senha para entrar. Sem ela, o site abre direto |
-| `CRON_SECRET` | texto longo aleatório (use o mesmo no 03_agendamento.sql) |
+| `CRON_SECRET` | texto longo aleatório (o mesmo vai no 04_agendamento.sql) |
 | `SMTP_HOST` | `smtp.gmail.com` (Google) ou `smtp.office365.com` (Microsoft) |
 | `SMTP_PORT` | `465` (Google) ou `587` (Microsoft) |
 | `SMTP_USER` | e-mail que envia |
 | `SMTP_PASS` | senha de app dessa conta |
-| `SITE_URL` | opcional — endereço do site, se usar domínio próprio |
+| `SITE_URL` | opcional: endereço do site, se usar domínio próprio |
 
-3. **Deploy**. Abra o site e escolha seu nome (se cadastrou `ACESSO_SENHA`, ele pede a senha antes).
+- **Google Workspace / Gmail:** ative a verificação em duas etapas e crie uma *senha de app*.
+- **Microsoft 365:** o administrador precisa habilitar "SMTP autenticado" para a caixa.
+- **Remetente:** o "E-mail que envia" da aba E-mails deve ser o mesmo `SMTP_USER`.
 
-**Conta de e-mail**
-- Google Workspace / Gmail: ative a verificação em duas etapas na conta e crie uma *senha de app* (Conta Google → Segurança → Senhas de app). Use essa senha em `SMTP_PASS`.
-- Microsoft 365: o administrador precisa habilitar "SMTP autenticado" para a caixa.
-- O "E-mail que envia" da aba E-mails deve ser o mesmo `SMTP_USER` (ou um alias dele), senão o provedor recusa.
-
-Depois de mudar qualquer variável, faça **Redeploy** para ela valer.
-
-## 3. Agendamento semanal
-
-1. Abra `supabase/03_agendamento.sql`, troque `SEU-PROJETO.vercel.app` pelo endereço do site e `COLE_AQUI_O_CRON_SECRET` pelo valor do `CRON_SECRET`.
-2. Rode no SQL Editor do Supabase. (Se der erro de extensão, ative **pg_cron** e **pg_net** em *Database → Extensions* e rode de novo.)
-
-O Supabase chama a API de hora em hora; ela só envia no dia/horário escolhido na aba E-mails, uma vez por dia. Se o SMTP falhar em todos os envios, tenta de novo na hora seguinte. Cada envio aparece em **Últimos envios** na aba E-mails.
-
-Para testar sem esperar: na aba E-mails, use **Ver prévia** e **Enviar teste para mim**.
+Depois, abra `supabase/04_agendamento.sql`, troque o endereço do site e o `CRON_SECRET`, e rode no SQL Editor. Ele chama a Vercel de hora em hora; ela só envia no dia/horário configurado, uma vez por dia.
 
 ---
 
 ## Como funciona o uso
 
-- **Quem é você?** — no primeiro acesso cada pessoa escolhe o próprio nome; ele vai para o histórico das alterações. Dá para trocar no botão com o nome, no topo. (É identificação, não login.)
-- **Sem senha** (padrão) — quem tiver o link consegue ver e alterar as atividades. O site não aparece no Google, mas evite divulgar o link fora da equipe. Para fechar, basta cadastrar `ACESSO_SENHA` na Vercel e fazer redeploy. Sem senha, o "Enviar teste" só envia para e-mails já cadastrados na lista.
-- **Prazo** — a primeira definição de prazo não pede motivo. Mudar um prazo já definido exige motivo e marca a atividade como **Data alterada** (com "Antes: …").
-- **Atrasada** — prazo anterior a hoje e status diferente de Concluído.
-- **"15 de cada mês"** — as duas ações recorrentes de RH mostram "Todo dia 15" e o próximo dia 15; o prazo delas não é editável.
-- O link **Abrir minhas atividades** do e-mail já abre a página filtrada na pessoa.
+- **Quem é você?** No primeiro acesso, cada pessoa escolhe o próprio nome, que vai para o histórico. Dá para trocar no botão com o nome, no topo. É identificação, não login: quem tiver o link consegue ver e alterar as atividades, então não divulgue o link fora da equipe.
+- **Prazo:** a primeira definição não pede motivo. Mudar um prazo já definido exige motivo e marca a atividade como **Data alterada**, mostrando "Antes: …".
+- **Atrasada:** prazo anterior a hoje e status diferente de Concluído.
+- **"15 de cada mês":** as duas ações recorrentes de RH mostram "Todo dia 15" e o próximo dia 15.
+- **Enviar teste:** só envia para e-mails já cadastrados na lista.
 
 ## Ajustes direto no Supabase (Table Editor)
 
-- Texto de uma ação: tabela `atividades`, coluna `acao`.
-- Frase do painel ("Visita da certificadora…"): tabela `config`, coluna `aviso_painel`.
-- Renomear pessoa: tabela `pessoas`, coluna `nome`.
-
-## Rodar no computador (opcional)
-
-```bash
-npm install
-cp .env.example .env    # preencha
-npm run dev             # http://localhost:3000
-```
+- **Texto de uma ação:** tabela `atividades`, coluna `acao`.
+- **Frase do painel** ("Visita da certificadora…"): tabela `config`, coluna `aviso_painel`.
+- **Renomear pessoa:** tabela `pessoas`, coluna `nome`.

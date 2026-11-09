@@ -1,4 +1,5 @@
 // Plano de Ação · Auditoria Interna — front (HTML + JS puro, sem build)
+import { rpc, supabaseConfigurado } from './supabase.js';
 
 // ============================================================================
 // utilidades
@@ -59,34 +60,28 @@ const aberta = (at) => at.status !== 'concluido';
 // ============================================================================
 const estado = {
   dados: null,
-  senha: guardar.ler('pa_senha'),
+  servidor: null,
   euId: Number(guardar.ler('pa_eu')) || null,
   painelPessoa: guardar.ler('pa_painel_pessoa') || 'todas',
   rascunhoEmails: null,
   ultimaAba: null,
 };
 
-class ErroApi extends Error { constructor(msg, status) { super(msg); this.status = status; } }
-
+// Só para os e-mails (função da Vercel em /api/lembretes); os dados vão direto ao Supabase
 async function api(caminho, { metodo = 'GET', corpo } = {}) {
   let r;
   try {
     r = await fetch(`/api/${caminho}`, {
       method: metodo,
-      headers: { 'x-senha': encodeURIComponent(estado.senha || ''), ...(corpo ? { 'Content-Type': 'application/json' } : {}) },
+      headers: corpo ? { 'Content-Type': 'application/json' } : {},
       body: corpo ? JSON.stringify(corpo) : undefined,
     });
   } catch {
-    throw new ErroApi('Sem conexão com o servidor. Verifique a internet e tente de novo.', 0);
+    throw new Error('Sem conexão com o servidor. Verifique a internet e tente de novo.');
   }
   let json = {};
   try { json = await r.json(); } catch { /* resposta sem JSON */ }
-  if (r.status === 401 && !$('.entrada')) {
-    estado.senha = null;
-    guardar.gravar('pa_senha', null);
-    mostrarEntrada('A senha mudou ou expirou. Entre de novo.');
-  }
-  if (!r.ok) throw new ErroApi(json.erro || `Erro ${r.status}`, r.status);
+  if (!r.ok) throw new Error(json.erro || `Erro ${r.status}`);
   return json;
 }
 
@@ -102,7 +97,13 @@ function preparar(d) {
 }
 
 async function carregar() {
-  estado.dados = preparar(await api('dados'));
+  const [dados, servidor] = await Promise.all([
+    rpc('carregar_dados'),
+    estado.servidor || api('lembretes', { metodo: 'POST', corpo: { acao: 'status' } }).catch(() => ({ indisponivel: true })),
+  ]);
+  estado.servidor = servidor;
+  dados.servidor = servidor;
+  estado.dados = preparar(dados);
 }
 
 const eu = () => estado.dados?.pessoasPorId.get(estado.euId) || null;
@@ -143,43 +144,8 @@ function abrirModal(html, { largo = false, fixo = false, aoFechar } = {}) {
 const cabModal = (titulo, eyebrow = '') => `<div class="modal-cab"><div>${eyebrow ? `<div class="eyebrow">${eyebrow}</div>` : ''}<h2>${titulo}</h2></div><button class="fechar" data-fechar aria-label="Fechar">${ICONE_X}</button></div>`;
 
 // ============================================================================
-// entrada (senha) e identificação
+// identificação
 // ============================================================================
-function mostrarEntrada(msg = '') {
-  $('.entrada')?.remove();
-  const el = document.createElement('div');
-  el.className = 'entrada';
-  el.innerHTML = `<form class="modal" autocomplete="on">
-    <div class="modal-corpo" style="padding:28px 26px 8px">
-      <div class="logo">O</div>
-      <h2>Plano de Ação · Auditoria Interna</h2>
-      <p>OROS · BU Educação — informe a senha da equipe para acessar.</p>
-      <div class="campo"><label for="in-senha">Senha de acesso</label>
-        <input id="in-senha" type="password" autocomplete="current-password" required></div>
-      <p class="erro-form" id="in-erro" style="margin:0 0 6px">${esc(msg)}</p>
-    </div>
-    <div class="modal-rod" style="border:0;padding:8px 26px 24px"><button class="btn btn-azul" style="width:100%">Entrar</button></div>
-  </form>`;
-  document.body.appendChild(el);
-  $('#in-senha', el).focus();
-  $('form', el).addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = $('button', el);
-    btn.disabled = true; btn.textContent = 'Entrando…';
-    estado.senha = $('#in-senha', el).value;
-    try {
-      await carregar();
-      guardar.gravar('pa_senha', estado.senha);
-      el.remove();
-      if (!eu()) pedirIdentidade(() => render(), false);
-      else { atualizarBotaoEu(); render(); }
-    } catch (err) {
-      $('#in-erro', el).textContent = err.status === 401 ? 'Senha incorreta.' : err.message;
-      btn.disabled = false; btn.textContent = 'Entrar';
-    }
-  });
-}
-
 function pedirIdentidade(depois, podeFechar = true) {
   const opcoes = estado.dados.pessoas.map((p) => `<option value="${p.id}" ${p.id === estado.euId ? 'selected' : ''}>${esc(p.nome)}</option>`).join('');
   const m = abrirModal(`${cabModal('Quem é você?')}
@@ -202,7 +168,7 @@ function pedirIdentidade(depois, podeFechar = true) {
     depois?.();
   });
   $('#qs-sair', m)?.addEventListener('click', () => {
-    guardar.gravar('pa_senha', null); guardar.gravar('pa_eu', null);
+    guardar.gravar('pa_eu', null);
     location.reload();
   });
 }
@@ -486,24 +452,28 @@ function abrirEditar(id) {
   $('#ed-salvar', m).addEventListener('click', async () => {
     const erro = $('#ed-erro', m);
     erro.textContent = '';
-    const corpo = { id: at.id, autor: eu().nome };
-    if (ed.status !== at.status) corpo.status = ed.status;
+    const args = { p_id: at.id, p_autor: eu().nome };
+    if (ed.status !== at.status) args.p_status = ed.status;
     if (prazoMudou()) {
-      corpo.prazo = ed.prazo || null;
+      args.p_alterar_prazo = true;
+      args.p_prazo = ed.prazo || null;
       if (precisaMotivo()) {
         if (ed.motivo.trim().length < 3) { erro.textContent = 'Informe o motivo da alteração do prazo.'; $('#ed-motivo', m).focus(); return; }
-        corpo.motivo = ed.motivo.trim();
+        args.p_motivo = ed.motivo.trim();
       }
     }
     const mesmos = ed.responsaveis.length === at.responsaveis.length && ed.responsaveis.every((x) => at.responsaveis.includes(x));
-    if (!mesmos) corpo.responsaveis = ed.responsaveis;
-    if ((ed.observacao.trim() || null) !== (at.observacao || null)) corpo.observacao = ed.observacao.trim();
-    if (Object.keys(corpo).length === 2) { m.fechar(); return; }
+    if (!mesmos) args.p_responsaveis = ed.responsaveis;
+    if ((ed.observacao.trim() || null) !== (at.observacao || null)) {
+      args.p_alterar_observacao = true;
+      args.p_observacao = ed.observacao.trim();
+    }
+    if (Object.keys(args).length === 2) { m.fechar(); return; }
 
     const btn = $('#ed-salvar', m);
     btn.disabled = true; btn.textContent = 'Salvando…';
     try {
-      await api('atividade', { metodo: 'PATCH', corpo });
+      await rpc('atualizar_atividade', args);
       await carregar();
       m.fechar();
       render();
@@ -582,7 +552,7 @@ function renderEmails() {
           <div class="campo"><label for="em-resumo">Resumo geral, com as atividades sem responsável, para</label>
             <input type="text" id="em-resumo" data-c="resumo_email" value="${esc(c.resumo_email || '')}" placeholder="e-mail de quem acompanha o plano"></div>
           <div class="prox"><span>${prox ? `Próximo envio: <b>${prox}</b>` : 'Envio automático desativado'}</span><button class="link" type="button" id="em-previa">Ver prévia</button></div>
-          ${srv.agendamento_configurado ? '' : '<p class="nota alerta">Falta configurar o agendamento (CRON_SECRET na Vercel + script 03 no Supabase). Veja o LEIA-ME.</p>'}
+          ${srv.agendamento_configurado ? '' : '<p class="nota alerta">Falta configurar o agendamento (CRON_SECRET na Vercel + script 04 no Supabase). Veja o LEIA-ME.</p>'}
           <p class="nota">${d.config.ultimo_envio_em ? `Último envio automático: ${fmtDataHora(d.config.ultimo_envio_em)}` : 'Nenhum envio automático ainda.'}</p>
         </section>
 
@@ -639,8 +609,8 @@ async function salvarEmails(avisar) {
   const btn = $('#em-salvar');
   if (btn) { btn.disabled = true; btn.textContent = 'Salvando…'; }
   try {
-    await api('config', { metodo: 'PUT', corpo: r.config });
-    await api('pessoas', { metodo: 'PUT', corpo: { pessoas: estado.dados.pessoas.map((p) => ({ id: p.id, ...pessoaRasc(p) })) } });
+    await rpc('salvar_config', { p_config: r.config });
+    await rpc('salvar_pessoas', { p_pessoas: estado.dados.pessoas.map((p) => ({ id: p.id, ...pessoaRasc(p) })) });
     estado.rascunhoEmails = null;
     await carregar();
     if (rotaAtual().aba === 'emails') renderEmails();
@@ -668,7 +638,7 @@ function abrirAddPessoa() {
   $('#ap-nome', m).focus();
   $('#ap-ok', m).addEventListener('click', async () => {
     try {
-      await api('pessoas', { metodo: 'POST', corpo: { nome: $('#ap-nome', m).value, email: $('#ap-email', m).value } });
+      await rpc('adicionar_pessoa', { p_nome: $('#ap-nome', m).value, p_email: $('#ap-email', m).value });
       await carregar();
       m.fechar();
       render();
@@ -737,6 +707,10 @@ async function abrirTeste() {
 }
 
 function abrirComoConectar() {
+  if (estado.servidor?.indisponivel) {
+    toast('A parte de e-mails só funciona no site publicado na Vercel.', true);
+    return;
+  }
   abrirModal(`${cabModal('Conectar a conta que envia')}
     <div class="modal-corpo" style="font-size:13px;line-height:1.55">
       <p style="margin-top:0">Por segurança, a senha da conta não fica nesta página: ela vai nas variáveis de ambiente da Vercel (<b>Settings → Environment Variables</b>). Depois de salvar, faça um novo deploy.</p>
@@ -753,11 +727,13 @@ function abrirComoConectar() {
 // início
 // ============================================================================
 async function iniciar() {
-  // Tenta carregar direto; se o servidor exigir senha (401), a tela de senha aparece sozinha
+  if (!supabaseConfigurado()) {
+    $('#app').innerHTML = `<div class="card vazio">Falta ligar a página ao Supabase.<br><small>Preencha a URL e a publishable key em <b>public/config.js</b> e envie para o GitHub.</small></div>`;
+    return;
+  }
   try {
     await carregar();
   } catch (e) {
-    if (e.status === 401) { $('#app').innerHTML = ''; return; }
     $('#app').innerHTML = `<div class="card vazio">Não foi possível carregar os dados.<br><small>${esc(e.message)}</small><br><br><button class="btn" onclick="location.reload()">Tentar de novo</button></div>`;
     return;
   }

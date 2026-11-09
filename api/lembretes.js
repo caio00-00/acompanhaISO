@@ -1,56 +1,57 @@
-// /api/lembretes
-//   Agendamento (pg_cron do Supabase ou Vercel Cron), com Authorization: Bearer CRON_SECRET:
+// /api/lembretes — única função da Vercel: os e-mails (precisam da senha da conta de e-mail).
+// Os dados vêm do Supabase pela publishable key (public/config.js); não precisa da senha do banco.
+//
+//   Agendamento (pg_cron do Supabase), com Authorization: Bearer CRON_SECRET:
 //     GET ou POST sem "acao" → envia se hoje for o dia/horário configurado e ainda não enviou hoje.
-//   Pela tela de E-mails (com a senha da equipe), POST { acao }:
-//     "previa"    { pessoa_id }          → HTML do e-mail daquela pessoa (ou do resumo, pessoa_id = "resumo")
-//     "teste"     { pessoa_id, email }   → envia a prévia para o e-mail informado
+//   Pela tela de E-mails, POST { acao }:
+//     "status"                           → se a conta de e-mail está configurada
+//     "previa"    { pessoa_id }          → HTML do e-mail daquela pessoa (ou "resumo")
+//     "teste"     { pessoa_id, email }   → envia a prévia para um e-mail já cadastrado
 //     "verificar"                        → testa a conexão SMTP
-import { rota, exigirSenha, senhaAtiva, ehAgendamento, corpo, urlDoSite, HttpError } from '../lib/http.js';
-import { db } from '../lib/db.js';
-import { carregarDados } from '../lib/dados.js';
+import { rota, ehAgendamento, corpo, urlDoSite, HttpError } from '../lib/http.js';
+import { rpc } from '../public/supabase.js';
 import { agoraSP } from '../lib/regras.js';
-import { montarLembrete, montarResumo, criarTransporte, enviar, enviarTodos } from '../lib/email.js';
+import {
+  montarLembrete, montarResumo, criarTransporte, enviar, enviarTodos, smtpConfigurado,
+} from '../lib/email.js';
 
 async function agendado(req) {
   if (!ehAgendamento(req)) throw new HttpError(401, 'Não autorizado');
   const agora = agoraSP();
-  const { rows } = await db().query('select * from config where id = 1');
-  const cfg = rows[0];
+  const dados = await rpc('carregar_dados');
+  const cfg = dados.config;
   if (!cfg.envio_ativo) return { enviado: false, motivo: 'Envio automático desativado' };
   if (agora.diaSemana !== cfg.dia_semana || agora.hora < cfg.horario) {
     return { enviado: false, motivo: 'Fora do dia/horário configurado', agora };
   }
 
-  // "Reserva" o envio de hoje antes de mandar, para duas chamadas seguidas não duplicarem
-  const reserva = await db().query(
-    `with antes as (select ultimo_envio_em from config where id = 1 for update)
-     update config c set ultimo_envio_em = now()
-       from antes
-      where c.id = 1
-        and (antes.ultimo_envio_em is null
-             or (antes.ultimo_envio_em at time zone 'America/Sao_Paulo')::date
-                < (now() at time zone 'America/Sao_Paulo')::date)
-     returning antes.ultimo_envio_em as anterior`,
-  );
-  if (!reserva.rowCount) return { enviado: false, motivo: 'Já enviado hoje' };
+  // Reserva o envio de hoje antes de mandar, para duas chamadas seguidas não duplicarem
+  const reserva = await rpc('reservar_envio_semanal');
+  if (!reserva.reservado) return { enviado: false, motivo: 'Já enviado hoje' };
 
   let resultados;
   try {
-    resultados = await enviarTodos(await carregarDados(), urlDoSite(req));
+    resultados = await enviarTodos(dados, urlDoSite(req));
   } catch (e) {
     resultados = [{ ok: false, erro: e.message }];
   }
-  // Se nada saiu (ex.: SMTP fora do ar), libera para tentar de novo na próxima hora
   if (resultados.length && !resultados.some((r) => r.ok)) {
-    await db().query('update config set ultimo_envio_em = $1 where id = 1', [reserva.rows[0].anterior]);
+    await rpc('liberar_envio_semanal', { p_anterior: reserva.anterior ?? null });
   }
   return { enviado: true, total: resultados.length, falhas: resultados.filter((r) => !r.ok) };
 }
 
 async function pelaTela(req) {
-  exigirSenha(req);
   const b = corpo(req);
   const site = urlDoSite(req);
+
+  if (b.acao === 'status') {
+    return {
+      smtp_configurado: smtpConfigurado(),
+      smtp_usuario: process.env.SMTP_USER || null,
+      agendamento_configurado: Boolean(process.env.CRON_SECRET),
+    };
+  }
 
   if (b.acao === 'verificar') {
     const t = criarTransporte();
@@ -65,7 +66,7 @@ async function pelaTela(req) {
   }
 
   if (b.acao === 'previa' || b.acao === 'teste') {
-    const dados = await carregarDados();
+    const dados = await rpc('carregar_dados');
     // a prévia usa o horário configurado (ex.: "Bom dia" se o envio é às 9h)
     const agora = { ...agoraSP(), hora: dados.config.horario };
     let msg;
@@ -83,17 +84,15 @@ async function pelaTela(req) {
 
     const email = String(b.email || '').trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Informe um e-mail válido para o teste');
-    if (!senhaAtiva()) {
-      // Sem senha, o site é aberto: o teste só vai para e-mails já cadastrados (evita uso para spam)
-      const cfg = dados.config;
-      const conhecidos = new Set([
-        ...dados.pessoas.map((p) => p.email),
-        cfg.remetente_email,
-        ...String(cfg.resumo_email || '').split(/[;,]/),
-      ].filter(Boolean).map((e) => e.trim().toLowerCase()));
-      if (!conhecidos.has(email.toLowerCase())) {
-        throw new HttpError(400, 'O teste só pode ir para um e-mail cadastrado na lista de destinatários (salve o seu primeiro).');
-      }
+    // O site é aberto: o teste só vai para e-mails já cadastrados (evita uso para spam)
+    const cfg = dados.config;
+    const conhecidos = new Set([
+      ...dados.pessoas.map((p) => p.email),
+      cfg.remetente_email,
+      ...String(cfg.resumo_email || '').split(/[;,]/),
+    ].filter(Boolean).map((e) => e.trim().toLowerCase()));
+    if (!conhecidos.has(email.toLowerCase())) {
+      throw new HttpError(400, 'O teste só pode ir para um e-mail cadastrado na lista de destinatários (salve o seu primeiro).');
     }
     const t = criarTransporte();
     try {

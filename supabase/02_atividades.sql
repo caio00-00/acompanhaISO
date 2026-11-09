@@ -1,5 +1,5 @@
 -- =====================================================================
--- 2/3 — Atividades fixas do plano (do documento "Pontos de melhorias
+-- 2/4 — Atividades fixas do plano (do documento "Pontos de melhorias
 -- levantados na Auditoria Interna"). Rode depois do 01_estrutura.sql.
 -- Só insere se a tabela estiver vazia: rodar de novo não apaga o andamento.
 -- =====================================================================
