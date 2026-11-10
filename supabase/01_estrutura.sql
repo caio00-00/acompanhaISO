@@ -49,7 +49,7 @@ create table if not exists historico (
   id              bigserial primary key,
   atividade_id    int  not null references atividades(id) on delete cascade,
   tipo            text not null check (tipo in
-                    ('prazo_definido', 'prazo_alterado', 'status', 'responsavel', 'observacao')),
+                    ('criada', 'prazo_definido', 'prazo_alterado', 'status', 'responsavel', 'observacao')),
   valor_anterior  text,
   valor_novo      text,
   motivo          text,

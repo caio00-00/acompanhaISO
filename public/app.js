@@ -143,6 +143,18 @@ function abrirModal(html, { largo = false, fixo = false, aoFechar } = {}) {
 
 const cabModal = (titulo, eyebrow = '') => `<div class="modal-cab"><div>${eyebrow ? `<div class="eyebrow">${eyebrow}</div>` : ''}<h2>${titulo}</h2></div><button class="fechar" data-fechar aria-label="Fechar">${ICONE_X}</button></div>`;
 
+// Seletor de responsáveis em "chips" (usado no Editar e na Nova atividade)
+function chipsResponsaveis(caixa, lista) {
+  const desenhar = () => {
+    const disponiveis = estado.dados.pessoas.filter((p) => !lista.includes(p.id));
+    caixa.innerHTML = lista.map((pid) => `<span class="chip">${esc(nomeDe(pid))}<button type="button" data-rm="${pid}" aria-label="Remover ${esc(nomeDe(pid))}">${ICONE_X}</button></span>`).join('')
+      + (disponiveis.length ? `<select aria-label="Adicionar responsável"><option value="">${lista.length ? '+ adicionar' : 'Selecione…'}</option>${disponiveis.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}</select>` : '');
+    $$('[data-rm]', caixa).forEach((b) => b.addEventListener('click', () => { lista.splice(lista.indexOf(Number(b.dataset.rm)), 1); desenhar(); }));
+    $('select', caixa)?.addEventListener('change', (e) => { if (e.target.value) { lista.push(Number(e.target.value)); desenhar(); } });
+  };
+  desenhar();
+}
+
 // ============================================================================
 // identificação
 // ============================================================================
@@ -307,7 +319,8 @@ function renderAtividades(params) {
   }).join('');
 
   $('#app').innerHTML = `
-    <section class="cab"><div><h1>${titulo}</h1><p class="sub">${sub}</p></div></section>
+    <section class="cab"><div><h1>${titulo}</h1><p class="sub">${sub}</p></div>
+      <button class="btn btn-azul" type="button" id="btn-nova">+ Nova atividade</button></section>
     <section class="card filtros">
       <label class="f-sel"><span class="rotulo">Pessoa</span>
         <select data-f="pessoa">
@@ -338,6 +351,68 @@ function renderAtividades(params) {
   $$('input[data-f]').forEach((c) => c.addEventListener('change', () => mudar(c.dataset.f, c.checked ? '1' : '')));
   $$('[data-status]').forEach((b) => b.addEventListener('click', () => mudar('status', b.dataset.status)));
   $$('[data-editar]').forEach((b) => b.addEventListener('click', () => abrirEditar(Number(b.dataset.editar))));
+  $('#btn-nova').addEventListener('click', () => abrirNovaAtividade({ area, pessoa }));
+}
+
+// ---------- nova atividade ----------
+function abrirNovaAtividade({ area, pessoa }) {
+  const d = estado.dados;
+  if (!eu()) { pedirIdentidade(() => abrirNovaAtividade({ area, pessoa })); return; }
+  const responsaveis = /^\d+$/.test(pessoa || '') && d.pessoasPorId.get(Number(pessoa)) ? [Number(pessoa)] : [];
+  const m = abrirModal(`${cabModal('Nova atividade')}
+    <div class="modal-corpo">
+      <div class="campo"><label for="na-area">Área</label>
+        <select id="na-area"><option value="">Selecione…</option>
+          ${d.areas.map((a) => `<option value="${a.id}" ${String(a.id) === String(area) ? 'selected' : ''}>${esc(a.nome)}</option>`).join('')}
+          <option value="nova">+ Nova área…</option></select>
+        <input type="text" id="na-area-nova" placeholder="Nome da nova área" style="margin-top:8px" hidden></div>
+      <div class="campo"><label for="na-acao">Ação</label>
+        <textarea id="na-acao" rows="3" placeholder="O que precisa ser feito"></textarea></div>
+      <div class="dupla dupla-m">
+        <div class="campo"><span class="lbl">Responsável</span><div class="chips" id="na-resp"></div></div>
+        <div class="campo"><label for="na-prazo">Prazo</label><input type="date" id="na-prazo"></div>
+      </div>
+      <div class="campo" style="margin:0"><label for="na-obs">Observação <span style="font-weight:400;color:var(--muted)">(opcional)</span></label>
+        <textarea id="na-obs" rows="2" placeholder="Combinados, evidências, onde está o documento…"></textarea></div>
+    </div>
+    <div class="modal-rod"><p class="erro-form" id="na-erro"></p>
+      <button class="btn" type="button" data-fechar>Cancelar</button>
+      <button class="btn btn-azul" type="button" id="na-ok">Adicionar atividade</button></div>`);
+
+  chipsResponsaveis($('#na-resp', m), responsaveis);
+  const selArea = $('#na-area', m);
+  const novaArea = $('#na-area-nova', m);
+  selArea.addEventListener('change', () => { novaArea.hidden = selArea.value !== 'nova'; if (!novaArea.hidden) novaArea.focus(); });
+  (selArea.value ? $('#na-acao', m) : selArea).focus();
+
+  $('#na-ok', m).addEventListener('click', async () => {
+    const erro = $('#na-erro', m);
+    erro.textContent = '';
+    const acao = $('#na-acao', m).value.trim();
+    if (!selArea.value || (selArea.value === 'nova' && !novaArea.value.trim())) { erro.textContent = 'Escolha a área.'; selArea.focus(); return; }
+    if (acao.length < 5) { erro.textContent = 'Descreva a ação.'; $('#na-acao', m).focus(); return; }
+    const btn = $('#na-ok', m);
+    btn.disabled = true; btn.textContent = 'Salvando…';
+    try {
+      const r = await rpc('adicionar_atividade', {
+        p_autor: eu().nome,
+        p_acao: acao,
+        p_area_id: selArea.value === 'nova' ? null : Number(selArea.value),
+        p_area_nova: selArea.value === 'nova' ? novaArea.value.trim() : null,
+        p_prazo: $('#na-prazo', m).value || null,
+        p_responsaveis: responsaveis,
+        p_observacao: $('#na-obs', m).value.trim() || null,
+      });
+      await carregar();
+      m.fechar();
+      const destino = `#/atividades?pessoa=todas&area=${r.area_id}`;
+      if (location.hash === destino) render(); else location.hash = destino;
+      toast(`Atividade adicionada: ${d.areasPorId.get(r.area_id)?.nome || estado.dados.areasPorId.get(r.area_id)?.nome} nº ${r.numero}`);
+    } catch (e) {
+      erro.textContent = e.message;
+      btn.disabled = false; btn.textContent = 'Adicionar atividade';
+    }
+  });
 }
 
 function celulaPrazo(at, hoje) {
@@ -367,6 +442,7 @@ function linhaAtividade(at, hoje) {
 // ---------- modal de edição ----------
 function textoHistorico(h) {
   switch (h.tipo) {
+    case 'criada': return `<b>Atividade incluída</b>${h.valor_novo ? ` · responsável: ${esc(h.valor_novo)}` : ''}`;
     case 'prazo_definido': return `<b>${h.valor_novo ? fmtData(h.valor_novo) : 'Sem prazo'}</b> · prazo definido`;
     case 'prazo_alterado': return `<b>${h.valor_anterior ? fmtCurta(h.valor_anterior) : 'sem prazo'} para ${h.valor_novo ? fmtData(h.valor_novo) : 'sem prazo'}</b> · ${esc(h.motivo || '')}`;
     case 'status': return `Status: ${STATUS[h.valor_anterior] || '—'} → <b>${STATUS[h.valor_novo] || '—'}</b>`;
@@ -406,13 +482,7 @@ function abrirEditar(id) {
   const prazoMudou = () => !recorrente && ed.prazo !== (at.prazo || '');
   const precisaMotivo = () => prazoMudou() && !(!at.prazo && !at.prazo_original);
 
-  function desenharResp() {
-    const disponiveis = d.pessoas.filter((p) => !ed.responsaveis.includes(p.id));
-    $('#ed-resp', m).innerHTML = ed.responsaveis.map((pid) => `<span class="chip">${esc(nomeDe(pid))}<button type="button" data-rm="${pid}" aria-label="Remover ${esc(nomeDe(pid))}">${ICONE_X}</button></span>`).join('')
-      + (disponiveis.length ? `<select id="ed-add" aria-label="Adicionar responsável"><option value="">${ed.responsaveis.length ? '+ adicionar' : 'Selecione…'}</option>${disponiveis.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join('')}</select>` : '');
-    $$('[data-rm]', m).forEach((b) => b.addEventListener('click', () => { ed.responsaveis = ed.responsaveis.filter((x) => x !== Number(b.dataset.rm)); desenharResp(); }));
-    $('#ed-add', m)?.addEventListener('change', (e) => { if (e.target.value) { ed.responsaveis.push(Number(e.target.value)); desenharResp(); } });
-  }
+  const desenharResp = () => chipsResponsaveis($('#ed-resp', m), ed.responsaveis);
 
   function desenharAviso() {
     const caixa = $('#ed-aviso', m);

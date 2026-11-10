@@ -9,6 +9,11 @@
 --     histórico (ex.: mudar prazo sem motivo é recusado pelo próprio banco).
 -- =====================================================================
 
+-- Histórico aceita o tipo 'criada' (atividades incluídas pela página)
+alter table historico drop constraint if exists historico_tipo_check;
+alter table historico add constraint historico_tipo_check check (tipo in
+  ('criada', 'prazo_definido', 'prazo_alterado', 'status', 'responsavel', 'observacao'));
+
 -- ---------------------------------------------------------------------
 -- Leitura: tudo o que as telas precisam, num JSON só
 -- ---------------------------------------------------------------------
@@ -148,6 +153,73 @@ begin
     update atividades set atualizado_em = now(), atualizado_por = v_autor where id = p_id;
   end if;
   return jsonb_build_object('ok', true, 'alterado', v_mudou);
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Nova atividade (o Nº é o próximo da área). Pode criar uma área nova.
+-- ---------------------------------------------------------------------
+create or replace function adicionar_atividade(
+  p_autor        text,
+  p_acao         text,
+  p_area_id      int    default null,
+  p_area_nova    text   default null,
+  p_prazo        date   default null,
+  p_responsaveis int[]  default null,
+  p_observacao   text   default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_autor  text := left(nullif(trim(p_autor), ''), 120);
+  v_acao   text := left(nullif(trim(p_acao), ''), 2000);
+  v_obs    text := left(nullif(trim(p_observacao), ''), 2000);
+  v_nova   text := left(nullif(trim(p_area_nova), ''), 80);
+  v_area   int  := p_area_id;
+  v_resp   int[];
+  v_num    int;
+  v_ordem  int;
+  v_id     int;
+  v_nomes  text;
+begin
+  if v_autor is null then raise exception 'Informe quem está fazendo a alteração'; end if;
+  if v_acao is null or length(v_acao) < 5 then raise exception 'Descreva a ação (o que precisa ser feito)'; end if;
+
+  if v_area is null then
+    if v_nova is null then raise exception 'Escolha a área'; end if;
+    select id into v_area from areas where lower(nome) = lower(v_nova);
+    if v_area is null then
+      insert into areas (nome, ordem) select v_nova, coalesce(max(ordem), 0) + 1 from areas returning id into v_area;
+    end if;
+  elsif not exists (select 1 from areas where id = v_area) then
+    raise exception 'Área inválida';
+  end if;
+
+  select coalesce(array_agg(distinct x), '{}'::int[]) into v_resp from unnest(coalesce(p_responsaveis, '{}'::int[])) x;
+  if exists (select 1 from unnest(v_resp) x where not exists (select 1 from pessoas where id = x)) then
+    raise exception 'Responsável inválido';
+  end if;
+
+  perform 1 from areas where id = v_area for update;   -- evita Nº repetido se duas pessoas salvarem juntas
+  select coalesce(max(numero), 0) + 1, coalesce(max(ordem), 0) + 1 into v_num, v_ordem
+    from atividades where area_id = v_area;
+
+  insert into atividades (area_id, numero, ordem, acao, observacao, prazo, prazo_original, atualizado_por)
+  values (v_area, v_num, v_ordem, v_acao, v_obs, p_prazo, p_prazo, v_autor)
+  returning id into v_id;
+
+  insert into atividade_responsaveis (atividade_id, pessoa_id) select v_id, x from unnest(v_resp) x;
+  select string_agg(nome, ', ' order by nome) into v_nomes from pessoas where id = any (v_resp);
+
+  insert into historico (atividade_id, tipo, valor_novo, autor) values (v_id, 'criada', v_nomes, v_autor);
+  if p_prazo is not null then
+    insert into historico (atividade_id, tipo, valor_novo, autor) values (v_id, 'prazo_definido', p_prazo::text, v_autor);
+  end if;
+
+  return jsonb_build_object('ok', true, 'id', v_id, 'area_id', v_area, 'numero', v_num);
 end;
 $$;
 
@@ -302,6 +374,7 @@ revoke all on table areas, pessoas, atividades, atividade_responsaveis, historic
 grant execute on function
   carregar_dados(),
   atualizar_atividade(int, text, text, boolean, date, text, boolean, text, int[]),
+  adicionar_atividade(text, text, int, text, date, int[], text),
   adicionar_pessoa(text, text),
   salvar_pessoas(jsonb),
   salvar_config(jsonb),

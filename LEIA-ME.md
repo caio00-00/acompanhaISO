@@ -3,7 +3,7 @@
 Página de acompanhamento das 39 ações levantadas na auditoria interna. Cada responsável entra, marca o andamento (A fazer → Fazendo → Concluído), ajusta o prazo com motivo e tudo fica salvo no Supabase com histórico. Opcionalmente, toda semana sai um e-mail para cada pessoa com o que está pendente.
 
 - **Painel**: números gerais e um cartão por área (filtra por pessoa).
-- **Atividades**: lista por área, filtros por pessoa, área, status, "data alterada" e "atrasadas"; botão **Editar** em cada uma.
+- **Atividades**: lista por área, filtros por pessoa, área, status, "data alterada" e "atrasadas"; botão **Editar** em cada uma e **+ Nova atividade** para incluir ações (em uma área existente ou numa área nova).
 - **E-mails**: remetente, dia/horário do envio automático, destinatários, prévia e teste.
 
 A página fala direto com o Supabase usando a **publishable key**. Não precisa de senha do banco nem de variáveis na Vercel.
@@ -77,6 +77,7 @@ Depois, abra `supabase/04_agendamento.sql`, troque o endereço do site e o `CRON
 ## Como funciona o uso
 
 - **Quem é você?** No primeiro acesso, cada pessoa escolhe o próprio nome, que vai para o histórico. Dá para trocar no botão com o nome, no topo. É identificação, não login: quem tiver o link consegue ver e alterar as atividades, então não divulgue o link fora da equipe.
+- **Nova atividade:** o Nº é o próximo da área, e a inclusão aparece no histórico com o nome de quem incluiu. Para apagar uma incluída por engano: Supabase → Table Editor → `atividades`.
 - **Prazo:** a primeira definição não pede motivo. Mudar um prazo já definido exige motivo e marca a atividade como **Data alterada**, mostrando "Antes: …".
 - **Atrasada:** prazo anterior a hoje e status diferente de Concluído.
 - **"15 de cada mês":** as duas ações recorrentes de RH mostram "Todo dia 15" e o próximo dia 15.
